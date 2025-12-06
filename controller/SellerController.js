@@ -1,5 +1,5 @@
 const Seller = require("../modules/seller");
-const bcrypt = require("bcrypt");
+const bcrypt = require('bcryptjs');
 const mongoose = require("mongoose");
 const User = require('../modules/user');
 
