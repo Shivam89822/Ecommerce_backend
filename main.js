@@ -2,18 +2,18 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const serverless = require('serverless-http'); // Ensure this is installed: npm install serverless-http
+const serverless = require('serverless-http');
 
 const server = express();
 
 // 1. Basic Middleware
 server.use(express.json());
-server.use(cors()); // Allow all origins by default
+server.use(cors());
 
-// 🚀 2. ROOT ROUTE (Top Priority)
-// This sits BEFORE the database connection so it always opens instantly.
+// 🚀 2. ROOT ROUTE (Must be at the top)
+// This loads INSTANTLY because it doesn't wait for the database.
 server.get('/', (req, res) => {
-  res.send('Server is running ✅ (Database check skipped for this route)');
+  res.send('Server is running successfully! 🚀');
 });
 
 // -- MONGOOSE CONNECTION LOGIC --
@@ -40,14 +40,13 @@ async function connectDB() {
     console.log('Connected to DB ✅');
   } catch (err) {
     console.error('DB connection failed ❌', err);
-    global.__mongooseConnect = null; // Reset promise so we can try again
+    global.__mongooseConnect = null;
     throw err;
   }
 }
 
 // 🛑 3. DATABASE MIDDLEWARE
-// This forces every route BELOW this line to wait for the DB connection.
-// This prevents the "spinning/loading" issue on cold starts.
+// Only routes BELOW this line will trigger a DB connection.
 server.use(async (req, res, next) => {
   try {
     await connectDB();
@@ -59,15 +58,13 @@ server.use(async (req, res, next) => {
 });
 
 // 4. LOAD CONTROLLERS
-// Wrapped in try/catch to debug file name casing issues on Vercel (Linux)
 let productController, userController, sellerController;
 try {
   productController = require('./controller/productController');
   userController = require('./controller/UserController');
   sellerController = require('./controller/SellerController');
 } catch (err) {
-  console.error('CRITICAL: Controller load failed. Check file names!', err);
-  // We throw here because the app cannot function without controllers
+  console.error('CRITICAL: Controller load failed.', err);
   throw err; 
 }
 
@@ -77,7 +74,6 @@ const checker = (req, res, next) => {
 };
 
 // 5. APPLICATION ROUTES
-// These will only run AFTER the DB is connected
 server.get('/products', productController.getProducts);
 server.post('/login', userController.Login);
 server.post('/signup', userController.createUser);
