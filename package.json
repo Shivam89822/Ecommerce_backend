@@ -1,7 +1,10 @@
 {
+  "name": "ecommerce-backend",
+  "version": "1.0.0",
+  "main": "main.js",
   "scripts": {
-    "dev": "nodemon main.js",
-    "start": "node main.js"
+    "start": "node main.js",
+    "dev": "nodemon main.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -10,7 +13,6 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.12.1",
-    "serverless-http": "^4.0.0",
     "slugify": "^1.6.6"
   },
   "devDependencies": {
