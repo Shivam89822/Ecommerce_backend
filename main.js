@@ -2,70 +2,28 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const serverless = require('serverless-http');
 
+// Note: We removed 'serverless-http' because Render runs a real server
 const server = express();
 
-// 1. Basic Middleware
+// Middleware
 server.use(express.json());
 server.use(cors());
 
-// 🚀 2. ROOT ROUTE (Must be at the top)
-// This loads INSTANTLY because it doesn't wait for the database.
+// 🚀 ROOT ROUTE (Health Check for Render)
+// Render needs this to know your server is alive
 server.get('/', (req, res) => {
-  res.send('Server is running successfully! 🚀');
+  res.send('Render Backend is Running! 🚀');
 });
 
-// -- MONGOOSE CONNECTION LOGIC --
-async function connectDB() {
-  const uri = process.env.DATABASE_LINK;
-  if (!uri) throw new Error('Missing DATABASE_LINK environment variable');
-
-  // If already connected, reuse existing connection
-  if (mongoose.connection && mongoose.connection.readyState === 1) {
-    return;
-  }
-
-  // If connection is in progress, wait for it
-  if (global.__mongooseConnect) {
-    await global.__mongooseConnect;
-    return;
-  }
-
-  // Start new connection
-  global.__mongooseConnect = mongoose.connect(uri);
-
-  try {
-    await global.__mongooseConnect;
-    console.log('Connected to DB ✅');
-  } catch (err) {
-    console.error('DB connection failed ❌', err);
-    global.__mongooseConnect = null;
-    throw err;
-  }
-}
-
-// 🛑 3. DATABASE MIDDLEWARE
-// Only routes BELOW this line will trigger a DB connection.
-server.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    console.error('Middleware DB Error:', err);
-    res.status(500).json({ error: 'Database connection failed' });
-  }
-});
-
-// 4. LOAD CONTROLLERS
+// Load Controllers
 let productController, userController, sellerController;
 try {
   productController = require('./controller/productController');
   userController = require('./controller/UserController');
   sellerController = require('./controller/SellerController');
 } catch (err) {
-  console.error('CRITICAL: Controller load failed.', err);
-  throw err; 
+  console.error('Controller Load Error:', err.message);
 }
 
 const checker = (req, res, next) => {
@@ -73,7 +31,7 @@ const checker = (req, res, next) => {
   next();
 };
 
-// 5. APPLICATION ROUTES
+// Routes
 server.get('/products', productController.getProducts);
 server.post('/login', userController.Login);
 server.post('/signup', userController.createUser);
@@ -96,19 +54,24 @@ server.post('/CompletedOrder', sellerController.CompletedOrder);
 server.get('/FetchOrderedProduct', userController.GetHistory);
 server.post('/postReview', checker, productController.postReview);
 
-// 6. GLOBAL ERROR HANDLER
+// Global Error Handler
 server.use((err, req, res, next) => {
   console.error('Unhandled error:', err.stack);
-  res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
-// 7. LOCAL DEVELOPMENT START
-if (require.main === module) {
-  const PORT = process.env.PORT || 8080;
-  server.listen(PORT, () => {
-    console.log(`Server is On ✅ Listening on port ${PORT}`);
-  });
-}
+// -- START SERVER LOGIC --
+const PORT = process.env.PORT || 8080;
+const DB_URI = process.env.DATABASE_LINK;
 
-// 8. EXPORT FOR VERCEL
-module.exports = serverless(server);
+// Connect to DB first, THEN start the server
+mongoose.connect(DB_URI)
+  .then(() => {
+    console.log('Connected to DB ✅');
+    server.listen(PORT, () => {
+      console.log(`Server listening on port ${PORT} 🚀`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to connect to DB ❌', err);
+  });
