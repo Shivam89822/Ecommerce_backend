@@ -1,71 +1,83 @@
-require('dotenv').config(); // keep this at top
+require('dotenv').config(); 
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const serverless = require('serverless-http'); // Ensure this is installed: npm install serverless-http
 
 const server = express();
-server.use(express.json());
-server.use(cors());
 
-// -- MONGOOSE: reuse connection in serverless env to avoid repeated connects
+// 1. Basic Middleware
+server.use(express.json());
+server.use(cors()); // Allow all origins by default
+
+// 🚀 2. ROOT ROUTE (Top Priority)
+// This sits BEFORE the database connection so it always opens instantly.
+server.get('/', (req, res) => {
+  res.send('Server is running ✅ (Database check skipped for this route)');
+});
+
+// -- MONGOOSE CONNECTION LOGIC --
 async function connectDB() {
   const uri = process.env.DATABASE_LINK;
-  if (!uri) {
-    throw new Error('Missing DATABASE_LINK environment variable');
-  }
+  if (!uri) throw new Error('Missing DATABASE_LINK environment variable');
 
-  // If already connected, reuse the connection
+  // If already connected, reuse existing connection
   if (mongoose.connection && mongoose.connection.readyState === 1) {
-    console.log('Using existing mongoose connection');
     return;
   }
 
-  // Avoid duplicating connections in hot reload / lambda reuse
+  // If connection is in progress, wait for it
   if (global.__mongooseConnect) {
     await global.__mongooseConnect;
     return;
   }
 
-  global.__mongooseConnect = mongoose.connect(uri, {
-    // options kept minimal — Mongoose v6+ ignores legacy options
-  }).then(() => {
-    console.log('Connected to DB ✅');
-  }).catch((err) => {
-    console.error('DB connection failed ❌', err);
-    // rethrow so caller knows
-    throw err;
-  });
+  // Start new connection
+  global.__mongooseConnect = mongoose.connect(uri);
 
-  await global.__mongooseConnect;
+  try {
+    await global.__mongooseConnect;
+    console.log('Connected to DB ✅');
+  } catch (err) {
+    console.error('DB connection failed ❌', err);
+    global.__mongooseConnect = null; // Reset promise so we can try again
+    throw err;
+  }
 }
 
-// Connect once at startup (this will run in Vercel on first invocation)
-connectDB().catch(err => {
-  // Log the error so Vercel runtime logs show the reason for crash
-  console.error('Initial DB connect error (catch):', err);
+// 🛑 3. DATABASE MIDDLEWARE
+// This forces every route BELOW this line to wait for the DB connection.
+// This prevents the "spinning/loading" issue on cold starts.
+server.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('Middleware DB Error:', err);
+    res.status(500).json({ error: 'Database connection failed' });
+  }
 });
 
-// require controllers with clear error message if missing (helps catch case-sensitivity)
+// 4. LOAD CONTROLLERS
+// Wrapped in try/catch to debug file name casing issues on Vercel (Linux)
 let productController, userController, sellerController;
 try {
   productController = require('./controller/productController');
   userController = require('./controller/UserController');
   sellerController = require('./controller/SellerController');
 } catch (err) {
-  console.error('Controller load error — check file paths and casing in ./controller/:', err);
-  // rethrow so Vercel logs capture it and you can see exact stack
-  throw err;
+  console.error('CRITICAL: Controller load failed. Check file names!', err);
+  // We throw here because the app cannot function without controllers
+  throw err; 
 }
 
 const checker = (req, res, next) => {
-  console.log('✅✅✅✅✅✅ checker hit');
+  console.log('✅ checker hit');
   next();
 };
 
-// routes (keep them as you had)
-server.get('/',(req, res) => {
-  res.send('Server is running ✅');
-});
+// 5. APPLICATION ROUTES
+// These will only run AFTER the DB is connected
 server.get('/products', productController.getProducts);
 server.post('/login', userController.Login);
 server.post('/signup', userController.createUser);
@@ -88,13 +100,13 @@ server.post('/CompletedOrder', sellerController.CompletedOrder);
 server.get('/FetchOrderedProduct', userController.GetHistory);
 server.post('/postReview', checker, productController.postReview);
 
-// Generic error handler so crashes show in logs and return 500
+// 6. GLOBAL ERROR HANDLER
 server.use((err, req, res, next) => {
-  console.error('Unhandled error:', err && err.stack ? err.stack : err);
-  res.status(500).json({ error: 'Internal Server Error' });
+  console.error('Unhandled error:', err.stack);
+  res.status(500).json({ error: 'Internal Server Error', details: err.message });
 });
 
-// Local start for dev
+// 7. LOCAL DEVELOPMENT START
 if (require.main === module) {
   const PORT = process.env.PORT || 8080;
   server.listen(PORT, () => {
@@ -102,7 +114,5 @@ if (require.main === module) {
   });
 }
 
-// Export serverless handler for Vercel
-// NOTE: make sure serverless-http is in "dependencies" (not devDependencies)
-const serverless = require('serverless-http');
+// 8. EXPORT FOR VERCEL
 module.exports = serverless(server);
