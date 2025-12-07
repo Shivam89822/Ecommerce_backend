@@ -63,6 +63,9 @@ const checker = (req, res, next) => {
 };
 
 // routes (keep them as you had)
+server.get('/',(req, res) => {
+  res.send('Server is running ✅');
+});
 server.get('/products', productController.getProducts);
 server.post('/login', userController.Login);
 server.post('/signup', userController.createUser);
